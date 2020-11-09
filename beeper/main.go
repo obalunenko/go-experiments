@@ -1,7 +1,7 @@
 package main
 
 import (
-	beeper "github.com/frozzare/go-beeper"
+	"github.com/frozzare/go-beeper"
 )
 
 func main() {

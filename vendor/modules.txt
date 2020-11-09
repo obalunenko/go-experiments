@@ -3,26 +3,27 @@
 # github.com/frozzare/go-beeper v1.0.0
 ## explicit
 github.com/frozzare/go-beeper
-# github.com/gen2brain/beeep v0.0.0-20200305193625-ff0f4a39397e
+# github.com/gen2brain/beeep v0.0.0-20200526185328-e9c15c258e28
 ## explicit
 github.com/gen2brain/beeep
-# github.com/godbus/dbus v4.1.0+incompatible
-github.com/godbus/dbus
-# github.com/gopherjs/gopherjs v0.0.0-20180825215210-0210a2f0f73c
+# github.com/go-toast/toast v0.0.0-20190211030409-01e6764cf0a4
+github.com/go-toast/toast
+# github.com/godbus/dbus/v5 v5.0.3
+github.com/godbus/dbus/v5
+# github.com/gopherjs/gopherjs v0.0.0-20200217142428-fce0ec30dd00
+## explicit
 github.com/gopherjs/gopherjs/js
 # github.com/gopherjs/gopherwasm v1.1.0
 github.com/gopherjs/gopherwasm/js
-# github.com/konsorten/go-windows-terminal-sequences v1.0.1
-github.com/konsorten/go-windows-terminal-sequences
 # github.com/nu7hatch/gouuid v0.0.0-20131221200532-179d4d0c4d8d
 github.com/nu7hatch/gouuid
 # github.com/pkg/errors v0.9.1
 ## explicit
 github.com/pkg/errors
-# github.com/sirupsen/logrus v1.5.0
+# github.com/sirupsen/logrus v1.7.0
 ## explicit
 github.com/sirupsen/logrus
-# github.com/stretchr/objx v0.2.0
+# github.com/stretchr/objx v0.3.0
 ## explicit
 github.com/stretchr/objx
 # github.com/tadvi/systray v0.0.0-20190226123456-11a2b8fa57af
@@ -31,16 +32,18 @@ github.com/tadvi/systray
 ## explicit
 go.uber.org/goleak
 go.uber.org/goleak/internal/stack
-# golang.org/x/lint v0.0.0-20190930215403-16217165b5de
+# golang.org/x/lint v0.0.0-20200302205851-738671d3881b
+## explicit
 golang.org/x/lint
 golang.org/x/lint/golint
-# golang.org/x/sys v0.0.0-20200302150141-5c8b2ff67527
+# golang.org/x/sys v0.0.0-20201107080550-4d91cf3a1aaf
+## explicit
+golang.org/x/sys/internal/unsafeheader
 golang.org/x/sys/unix
 golang.org/x/sys/windows
 golang.org/x/sys/windows/registry
-# golang.org/x/tools v0.0.0-20191108193012-7d206e10da11
+# golang.org/x/tools v0.0.0-20201103235415-b653051172e4
+## explicit
 golang.org/x/tools/go/ast/astutil
 golang.org/x/tools/go/gcexportdata
 golang.org/x/tools/go/internal/gcimporter
-# gopkg.in/toast.v1 v1.0.0-20180812000517-0a84660828b2
-gopkg.in/toast.v1
