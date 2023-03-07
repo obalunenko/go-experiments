@@ -10,11 +10,16 @@ import (
 )
 
 var (
-	logInstance = logrus.New()
+	logInstance *logrus.Logger
 )
+
+func init() {
+	logInstance = logrus.New()
+}
 
 // Params holds logger specific params.
 type Params struct {
+	Writer       io.WriteCloser
 	Level        string
 	Format       string
 	SentryParams SentryParams
@@ -23,6 +28,10 @@ type Params struct {
 // Init initiates logger and add format options.
 // Should be called only once, on start of app.
 func Init(ctx context.Context, p Params) {
+	if p.Writer == nil {
+		p.Writer = os.Stderr
+	}
+
 	makeLogInstance(ctx, p)
 }
 
@@ -43,10 +52,15 @@ type Logger interface {
 	WithFields(fields Fields) Logger
 
 	Writer() io.WriteCloser
+	LogLevel() Level
 }
 
 type logrusWrapper struct {
 	le *logrus.Entry
+}
+
+func (l logrusWrapper) LogLevel() Level {
+	return Level{Level: logInstance.GetLevel()}
 }
 
 func (l logrusWrapper) Debug(msg string) {
@@ -121,5 +135,5 @@ func makeLogInstance(ctx context.Context, p Params) {
 		}
 	}
 
-	WithField(ctx, "levels", strings.Join(levels, " ")).Info("logging enabled")
+	WithField(ctx, "levels", strings.Join(levels, " ")).Debug("logging enabled")
 }
