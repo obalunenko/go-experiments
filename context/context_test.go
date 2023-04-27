@@ -17,9 +17,9 @@ func TestCancelWithCause(t *testing.T) {
 	ctx := context.Background()
 	childCtx, cancel := context.WithCancelCause(ctx)
 
-	defer cancel(nil)
-
 	jobWithCause(childCtx, cancel)
+
+	cancel(nil)
 
 	t.Logf("parent err: %v", ctx.Err())
 	t.Logf("parent cause: %v", context.Cause(ctx))
