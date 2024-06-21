@@ -11,6 +11,7 @@ require (
 	github.com/sirupsen/logrus v1.9.0
 	github.com/stretchr/objx v0.5.0
 	github.com/stretchr/testify v1.8.4
+	github.com/zyedidia/generic v1.2.1
 	go.uber.org/goleak v1.2.1
 )
 

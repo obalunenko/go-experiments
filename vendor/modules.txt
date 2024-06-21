@@ -54,6 +54,9 @@ github.com/stretchr/testify/require
 # github.com/tadvi/systray v0.0.0-20190226123456-11a2b8fa57af
 ## explicit
 github.com/tadvi/systray
+# github.com/zyedidia/generic v1.2.1
+## explicit; go 1.18
+github.com/zyedidia/generic/list
 # go.uber.org/goleak v1.2.1
 ## explicit; go 1.18
 go.uber.org/goleak
