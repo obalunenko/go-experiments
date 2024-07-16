@@ -24,8 +24,8 @@ type contextWrap struct {
 	logger *log.Entry
 }
 
-func newContextWrap(context context.Context) *contextWrap {
-	id := rand.Int63()
+func newContextWrap(context context.Context, genFn func() int64) *contextWrap {
+	id := genFn()
 	l := log.WithFields(log.Fields{
 		"traceID": id,
 	})
@@ -137,13 +137,16 @@ func chainMiddleware(mw ...middleware) middleware {
 }
 
 type traceHandler struct {
+	r    *rand.Rand
 	next http.Handler
 }
 
 func (t *traceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := r.Context().(*contextWrap)
 	if !ok {
-		ctx = newContextWrap(r.Context())
+		ctx = newContextWrap(r.Context(), func() int64 {
+			return t.r.Int63()
+		})
 	}
 
 	ctx.SetLoggerFields(log.Fields{
@@ -160,7 +163,10 @@ func (t *traceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func withTracing(next http.Handler) http.Handler {
-	return &traceHandler{next: next}
+	return &traceHandler{
+		r:    rand.New(rand.NewSource(time.Now().UTC().UnixNano())),
+		next: next,
+	}
 
 }
 
@@ -337,8 +343,6 @@ func main() {
 	flag.Parse()
 
 	setLogger()
-
-	rand.Seed(time.Now().UTC().UnixNano())
 
 	mw := chainMiddleware(withTracing, withLogin)
 	mux := http.NewServeMux()

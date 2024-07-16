@@ -1,6 +1,6 @@
 module github.com/obalunenko/go-experiments
 
-go 1.20
+go 1.22
 
 require (
 	github.com/frozzare/go-beeper v1.0.0
