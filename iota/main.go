@@ -7,7 +7,7 @@ package main
 // _ // invalid default int value
 // apple
 // android
-//)
+// )
 type Platform int
 
 // Status represents
@@ -15,5 +15,5 @@ type Platform int
 // _ // invalid default int value
 // active
 // inactive
-//)
+// )
 type Status int

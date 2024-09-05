@@ -14,7 +14,6 @@ func main() {
 	svc, err := NewService(ctx, ServiceParams{
 		AppPort: "8080",
 	})
-
 	if err != nil {
 		logger.WithError(err).Fatal("Failed to create service")
 	}

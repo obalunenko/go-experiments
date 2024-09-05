@@ -61,7 +61,7 @@ func writeFile(content string, filename string, jobid int) error {
 	}()
 
 	// Open the file in append mode or create it if it does not exist
-	f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("open file: %w", err)
 	}

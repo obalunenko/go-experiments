@@ -21,5 +21,4 @@ func newUgly(a, b, c string) *foo {
 }
 
 func main() {
-
 }

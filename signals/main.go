@@ -26,7 +26,6 @@ func main() {
 	log.Infof("received signal: [%s]", sig.String())
 	cancel()
 	done, err := b.Stop()
-
 	if err != nil {
 		log.Errorf("failed to stop batch: %v", err)
 	}
@@ -72,7 +71,6 @@ func handleInput(ctx context.Context, b Batch) {
 				log.Infof("handleInput: line sent to input: [%s] \n", line)
 			}
 		}
-
 	}(ctx, input)
 
 	for {

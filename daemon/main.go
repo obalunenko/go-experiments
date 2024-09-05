@@ -58,7 +58,6 @@ func newDaemon(wg *sync.WaitGroup) *daemon {
 		stopChan: make(chan struct{}, 1),
 		wg:       wg,
 	}
-
 }
 
 // Service ...
@@ -104,7 +103,6 @@ func (svc *Service) StartDaemon() {
 
 // StopDaemon stops the daemon
 func (svc *Service) StopDaemon() {
-
 	svc.d.stop()
 }
 
@@ -158,7 +156,6 @@ func NewService(wg *sync.WaitGroup) *Service {
 			cancel: cancel,
 		},
 	}
-
 }
 
 func grabData(t time.Time) string {

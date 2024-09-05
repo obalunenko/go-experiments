@@ -34,7 +34,6 @@ func toGOB64(u user) (string, error) {
 // go binary decoder
 func fromGOB64(str string) (user, error) {
 	by, err := base64.StdEncoding.DecodeString(str)
-
 	if err != nil {
 		return user{}, errors.Wrap(err, `failed base64 Decode`)
 	}

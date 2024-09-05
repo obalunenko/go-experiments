@@ -41,7 +41,6 @@ func job(wg *sync.WaitGroup, jobs chan int) {
 	}
 	close(jobs)
 	wg.Done()
-
 }
 
 func results(wg *sync.WaitGroup, res chan int64) {

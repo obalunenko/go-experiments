@@ -24,7 +24,8 @@ type Server struct {
 type ShutdownFunc func(wg *sync.WaitGroup, s *http.Server)
 
 func NewServer(ctx context.Context, wg *sync.WaitGroup, name string, port string, logWriter io.Writer,
-	handler http.Handler, shutdownFunc ShutdownFunc) *Server {
+	handler http.Handler, shutdownFunc ShutdownFunc,
+) *Server {
 	errLog := log.New(logWriter, fmt.Sprintf("%s: ", name), log.LstdFlags)
 
 	srv := http.Server{

@@ -18,7 +18,6 @@ const (
 
 // compressFiles Compress csv file into zip archive
 func compressFiles(files []file, datePostfix string) (file, error) {
-
 	if len(files) == 0 {
 		return file{}, errors.New("no files to compress")
 	}
@@ -79,7 +78,6 @@ func openTestFile(path string) (file, error) {
 		name: info.Name(),
 		body: content,
 	}, nil
-
 }
 
 func main() {
@@ -109,5 +107,4 @@ func main() {
 	if err = osF.Close(); err != nil {
 		log.Fatal(err)
 	}
-
 }

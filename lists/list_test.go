@@ -64,15 +64,15 @@ func Test_convertListToSlice(t *testing.T) {
 			name: "",
 			args: args{
 				input: []Segment{
-					Segment{ID: 1, Name: "A"},
-					Segment{ID: 2, Name: "B"},
-					Segment{ID: 3, Name: "C"},
+					{ID: 1, Name: "A"},
+					{ID: 2, Name: "B"},
+					{ID: 3, Name: "C"},
 				},
 			},
 			want: []Segment{
-				Segment{ID: 1, Name: "A"},
-				Segment{ID: 2, Name: "B"},
-				Segment{ID: 3, Name: "C"},
+				{ID: 1, Name: "A"},
+				{ID: 2, Name: "B"},
+				{ID: 3, Name: "C"},
 			},
 		},
 	}

@@ -56,6 +56,7 @@ func (cw *contextWrap) LogInfo(msg ...interface{}) {
 func (cw *contextWrap) LogDebug(msg ...interface{}) {
 	cw.logger.Debug(messageFromMsgs(msg...))
 }
+
 func (cw *contextWrap) LogError(msg ...interface{}) {
 	cw.logger.Error(messageFromMsgs(msg...))
 }
@@ -167,7 +168,6 @@ func withTracing(next http.Handler) http.Handler {
 		r:    rand.New(rand.NewSource(time.Now().UTC().UnixNano())),
 		next: next,
 	}
-
 }
 
 func withLogin(next http.Handler) http.Handler {
@@ -309,9 +309,7 @@ func home(w http.ResponseWriter, r *http.Request) {
 	// http.Redirect()
 }
 
-var (
-	logLevel = flag.String("log_level", "DEBUG", "Set level of output logs")
-)
+var logLevel = flag.String("log_level", "DEBUG", "Set level of output logs")
 
 func setLogger() {
 	l, err := log.ParseLevel(*logLevel)

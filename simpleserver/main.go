@@ -8,16 +8,45 @@ import (
 	"sync"
 )
 
-var data map[string]*storage
-
 type storage struct {
-	name   string
-	values []int
+	Name   string `json:"name"`
+	Values []int  `json:"values"`
+}
+
+type repository interface {
+	setData(key string, data []int)
+	getData(key string) *storage
+}
+
+type smap struct {
+	data sync.Map
+}
+
+func (s *smap) setData(key string, data []int) {
+	st, ok := s.data.Load(key)
+	if !ok || st == nil {
+		st = &storage{
+			Name:   key,
+			Values: make([]int, 0),
+		}
+	}
+
+	st.(*storage).Values = append(st.(*storage).Values, data...)
+	s.data.Store(key, st)
+}
+
+func (s *smap) getData(key string) *storage {
+	st, ok := s.data.Load(key)
+	if !ok || st == nil {
+		return nil
+	}
+
+	return st.(*storage)
 }
 
 type service struct {
-	data      map[string]*storage
-	dataMutex sync.Mutex
+	data      repository
+	dataMutex sync.RWMutex
 }
 
 func (s *service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -35,10 +64,10 @@ func (s *service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			s.getData(w, r)
-		case http.MethodPut:
-			s.setData(w, r)
 		case http.MethodPost:
-			s.udpateData(w, r)
+			s.setData(w, r)
+		case http.MethodPut:
+			s.updateData(w, r)
 		default:
 			http.Error(w, fmt.Sprintf("[%s] unsupported method", r.Method), http.StatusMethodNotAllowed)
 		}
@@ -47,15 +76,12 @@ func (s *service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		makeResponse(w, "Welcome to main")
 		return
 	}
-
 }
 
 func main() {
-	data = make(map[string]*storage)
-
 	svc := service{
-		data:      make(map[string]*storage),
-		dataMutex: sync.Mutex{},
+		data:      &smap{},
+		dataMutex: sync.RWMutex{},
 	}
 
 	mux := http.DefaultServeMux
@@ -78,47 +104,57 @@ func (s *service) setData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.dataMutex.Lock()
-	data[rb.Key].values = append(data[rb.Key].values, rb.Data...)
-	s.dataMutex.Unlock()
+	s.data.setData(rb.Key, rb.Data)
 
-	makeResponse(w, "Success")
+	makeResponse(w, "Success", http.StatusCreated)
 }
 
-func (s *service) udpateData(w http.ResponseWriter, r *http.Request) {
+func (s *service) updateData(w http.ResponseWriter, r *http.Request) {
 	var rb requestBody
 	if err := json.NewDecoder(r.Body).Decode(&rb); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	s.dataMutex.Lock()
-	data[rb.Key].values = append(data[rb.Key].values, rb.Data...)
-	s.dataMutex.Unlock()
-
-	makeResponse(w, "Success")
-}
-
-func (s *service) getData(w http.ResponseWriter, r *http.Request) {
-	s.dataMutex.Lock()
-	responseData := data[r.URL.Query().Get("key")]
-	s.dataMutex.Unlock()
-
-	if len(responseData.values) == 0 {
-		makeResponse(w, "no data")
+	st := s.data.getData(rb.Key)
+	if st == nil {
+		makeResponse(w, fmt.Sprintf("no data for key [%s]", rb.Key), http.StatusNotFound)
 		return
 	}
 
-	makeResponse(w, responseData)
+	s.data.setData(rb.Key, rb.Data)
+
+	makeResponse(w, "Success", http.StatusAccepted)
 }
 
-func makeResponse(w http.ResponseWriter, v interface{}) {
-	if err := json.NewEncoder(w).Encode(v); err != nil {
+func (s *service) getData(w http.ResponseWriter, r *http.Request) {
+	k := r.URL.Query().Get("key")
+
+	responseData := s.data.getData(k)
+
+	if responseData == nil {
+		makeResponse(w, fmt.Sprintf("no data for key [%s]", k), http.StatusNotFound)
+		return
+	}
+
+	makeResponse(w, responseData, http.StatusOK)
+}
+
+func makeResponse(w http.ResponseWriter, v any, status ...int) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if len(status) > 0 {
+		w.WriteHeader(status[0])
+	}
+
+	if err := json.NewEncoder(w).Encode(map[string]any{
+		"payload": v,
+	}); err != nil {
 		http.Error(w, "failed to write response: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 }
 
-func indexHandler(w http.ResponseWriter, r *http.Request) {
-	makeResponse(w, "Hellp there!")
+func indexHandler(w http.ResponseWriter, _ *http.Request) {
+	makeResponse(w, "Hello there!", http.StatusOK)
 }
