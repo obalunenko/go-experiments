@@ -10,4 +10,6 @@ func main() {
 
 	// beep three times
 	beeper.Beep(3)
+
+	beeper.Melody()
 }

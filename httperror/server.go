@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"sync"
 
-	logger "github.com/obalunenko/logger"
+	"github.com/obalunenko/logger"
 )
 
 type Server struct {

@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
@@ -24,7 +23,7 @@ type Job struct {
 func NewJob(id int, filename string, m *sync.Mutex, wg *sync.WaitGroup) *Job {
 	return &Job{
 		id:       id,
-		filename: fileName,
+		filename: filename,
 		m:        m,
 		wg:       wg,
 	}
@@ -96,7 +95,7 @@ func main() {
 	wg.Wait()
 
 	// Read and print the file contents
-	fileData, err := ioutil.ReadFile(fpath)
+	fileData, err := os.ReadFile(fpath)
 	if err != nil {
 		fmt.Println("Error reading file:", err)
 		return

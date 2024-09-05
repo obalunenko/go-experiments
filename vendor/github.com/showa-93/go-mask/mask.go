@@ -5,12 +5,12 @@ import (
 	"encoding/hex"
 	"math"
 	"math/rand"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
 	"unicode/utf8"
-
-	"reflect"
+	"unsafe"
 )
 
 func init() {
@@ -145,13 +145,30 @@ type structType struct {
 	structFields []reflect.StructField
 }
 
+type typeToStructCache struct {
+	m sync.RWMutex
+	v map[reflect.Type]structType
+}
+
+func (c *typeToStructCache) get(rt reflect.Type) (structType, bool) {
+	defer c.m.RUnlock()
+	c.m.RLock()
+	st, ok := c.v[rt]
+	return st, ok
+}
+
+func (c *typeToStructCache) set(rt reflect.Type, st structType) {
+	defer c.m.Unlock()
+	c.m.Lock()
+	c.v[rt] = st
+}
+
 // Masker is a struct that defines the masking process.
 type Masker struct {
 	cache             bool
-	mu                sync.RWMutex
+	typeToStructCache *typeToStructCache
 	tagName           string
 	maskChar          string
-	typeToStructCache map[reflect.Type]structType
 
 	maskFieldMap map[string]string
 
@@ -173,9 +190,10 @@ func NewMasker() *Masker {
 		tagName:  TagName,
 		maskChar: maskChar,
 
-		cache:             true,
-		typeToStructCache: make(map[reflect.Type]structType),
-
+		cache: true,
+		typeToStructCache: &typeToStructCache{
+			v: make(map[reflect.Type]structType),
+		},
 		maskFieldMap: make(map[string]string),
 
 		maskStringFuncKeys:  make([]string, 0, 10),
@@ -351,10 +369,21 @@ func (m *Masker) maskAny(tag string, value any) (bool, any, error) {
 	return false, value, nil
 }
 
-func (m *Masker) maskAnyValue(tag string, value reflect.Value) (bool, reflect.Value, error) {
+func (m *Masker) maskAnyValue(tag string, value reflect.Value, cb circuitBreaker) (bool, reflect.Value, error) {
 	if tag != "" {
 		for _, mt := range m.maskAnyFuncKeys {
 			if strings.HasPrefix(tag, mt) {
+				if isCircuitBreakerSupported(value.Kind()) {
+					if mp := cb.get(value); mp.IsValid() {
+						return true, mp, nil
+					}
+					v, err := m.maskAnyFuncMap[mt](tag[len(mt):], value.Interface())
+					if err != nil {
+						return true, reflect.Value{}, err
+					}
+					cb.set(value, reflect.ValueOf(v))
+					return true, reflect.ValueOf(v), nil
+				}
 				v, err := m.maskAnyFuncMap[mt](tag[len(mt):], value.Interface())
 				return true, reflect.ValueOf(v), err
 			}
@@ -434,7 +463,8 @@ func (m *Masker) MaskZero(arg string, value any) (any, error) {
 // Mask returns an object with the mask applied to any given object.
 // The function's argument can accept any type, including pointer, map, and slice types, in addition to struct.
 func (m *Masker) Mask(target any) (ret any, err error) {
-	rv, err := m.mask(reflect.ValueOf(target), "", reflect.Value{})
+	cb := localCircuitBreaker{}
+	rv, err := m.mask(reflect.ValueOf(target), "", reflect.Value{}, cb)
 	if err != nil {
 		return ret, err
 	}
@@ -442,26 +472,50 @@ func (m *Masker) Mask(target any) (ret any, err error) {
 	return rv.Interface(), nil
 }
 
-func (m *Masker) mask(rv reflect.Value, tag string, mp reflect.Value) (reflect.Value, error) {
-	if ok, v, err := m.maskAnyValue(tag, rv); ok {
+type localCircuitBreaker map[interface{}]reflect.Value
+
+func (cb localCircuitBreaker) get(rv reflect.Value) reflect.Value {
+	return cb[getAddr(rv.Interface())]
+}
+
+func (cb localCircuitBreaker) set(rv reflect.Value, mp reflect.Value) {
+	cb[getAddr(rv.Interface())] = mp
+}
+
+func isCircuitBreakerSupported(k reflect.Kind) bool {
+	switch k {
+	case reflect.Ptr, reflect.Slice, reflect.Map:
+		return true
+	default:
+		return false
+	}
+}
+
+type circuitBreaker interface {
+	get(reflect.Value) reflect.Value
+	set(reflect.Value, reflect.Value)
+}
+
+func (m *Masker) mask(rv reflect.Value, tag string, mp reflect.Value, cb circuitBreaker) (reflect.Value, error) {
+	if ok, v, err := m.maskAnyValue(tag, rv, cb); ok {
 		return v, err
 	}
 	switch rv.Type().Kind() {
 	case reflect.Interface:
-		return m.maskInterface(rv, tag, mp)
+		return m.maskInterface(rv, tag, mp, cb)
 	case reflect.Ptr:
-		return m.maskPtr(rv, tag, mp)
+		return m.maskPtr(rv, tag, mp, cb)
 	case reflect.Struct:
-		return m.maskStruct(rv, tag, mp)
+		return m.maskStruct(rv, tag, mp, cb)
 	case reflect.Array:
-		return m.maskSlice(rv, tag, mp)
+		return m.maskSlice(rv, tag, mp, cb)
 	case reflect.Slice:
 		if rv.IsNil() {
 			return reflect.Zero(rv.Type()), nil
 		}
-		return m.maskSlice(rv, tag, mp)
+		return m.maskSlice(rv, tag, mp, cb)
 	case reflect.Map:
-		return m.maskMap(rv, tag, mp)
+		return m.maskMap(rv, tag, mp, cb)
 	case reflect.String:
 		return m.maskString(rv, tag, mp)
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
@@ -471,7 +525,7 @@ func (m *Masker) mask(rv reflect.Value, tag string, mp reflect.Value) (reflect.V
 	case reflect.Float32, reflect.Float64:
 		return m.maskfloat(rv, tag, mp)
 	default:
-		if mp.IsValid() {
+		if mp.CanSet() {
 			mp.Set(rv)
 			return mp, nil
 		}
@@ -479,13 +533,13 @@ func (m *Masker) mask(rv reflect.Value, tag string, mp reflect.Value) (reflect.V
 	}
 }
 
-func (m *Masker) maskInterface(rv reflect.Value, tag string, _ reflect.Value) (reflect.Value, error) {
+func (m *Masker) maskInterface(rv reflect.Value, tag string, _ reflect.Value, cb circuitBreaker) (reflect.Value, error) {
 	if rv.IsNil() {
 		return reflect.Zero(rv.Type()), nil
 	}
 
 	mp := reflect.New(rv.Type()).Elem()
-	rv2, err := m.mask(reflect.ValueOf(rv.Interface()), tag, reflect.Value{})
+	rv2, err := m.mask(reflect.ValueOf(rv.Interface()), tag, reflect.Value{}, cb)
 	if err != nil {
 		return reflect.Value{}, err
 	}
@@ -494,13 +548,17 @@ func (m *Masker) maskInterface(rv reflect.Value, tag string, _ reflect.Value) (r
 	return mp, nil
 }
 
-func (m *Masker) maskPtr(rv reflect.Value, tag string, _ reflect.Value) (reflect.Value, error) {
+func (m *Masker) maskPtr(rv reflect.Value, tag string, _ reflect.Value, cb circuitBreaker) (reflect.Value, error) {
 	if rv.IsNil() {
 		return reflect.Zero(rv.Type()), nil
 	}
+	if mp := cb.get(rv); mp.IsValid() {
+		return mp, nil
+	}
 
 	mp := reflect.New(rv.Type().Elem())
-	rv2, err := m.mask(rv.Elem(), tag, mp.Elem())
+	cb.set(rv, mp)
+	rv2, err := m.mask(rv.Elem(), tag, mp.Elem(), cb)
 	if err != nil {
 		return reflect.Value{}, err
 	}
@@ -509,26 +567,24 @@ func (m *Masker) maskPtr(rv reflect.Value, tag string, _ reflect.Value) (reflect
 	return mp, nil
 }
 
-func (m *Masker) maskStruct(rv reflect.Value, tag string, mp reflect.Value) (reflect.Value, error) {
+func (m *Masker) maskStruct(rv reflect.Value, _ string, mp reflect.Value, cb circuitBreaker) (reflect.Value, error) {
 	if rv.IsZero() {
 		return reflect.Zero(rv.Type()), nil
 	}
 
-	rt := rv.Type()
-	var st structType
+	var (
+		rt = rv.Type()
+		st structType
+		ok bool
+	)
 	if m.cache {
-		m.mu.RLock()
-		var ok bool
-		st, ok = m.typeToStructCache[rt]
-		m.mu.RUnlock()
+		st, ok = m.typeToStructCache.get(rt)
 		if !ok {
-			m.mu.Lock()
 			st.value = reflect.New(rt).Elem()
 			for i := 0; i < rt.NumField(); i++ {
 				st.structFields = append(st.structFields, rt.Field(i))
 			}
-			m.typeToStructCache[rt] = st
-			m.mu.Unlock()
+			m.typeToStructCache.set(rt, st)
 		}
 		if !mp.IsValid() {
 			mp = st.value
@@ -539,6 +595,9 @@ func (m *Masker) maskStruct(rv reflect.Value, tag string, mp reflect.Value) (ref
 		}
 	}
 
+	// copy private fields
+	mp.Set(rv)
+
 	for i := 0; i < rt.NumField(); i++ {
 		var field reflect.StructField
 		if m.cache {
@@ -547,7 +606,7 @@ func (m *Masker) maskStruct(rv reflect.Value, tag string, mp reflect.Value) (ref
 			field = rt.Field(i)
 		}
 		// skip private field
-		if field.PkgPath != "" {
+		if !field.IsExported() {
 			continue
 		}
 		tag := field.Tag.Get(m.tagName)
@@ -559,7 +618,7 @@ func (m *Masker) maskStruct(rv reflect.Value, tag string, mp reflect.Value) (ref
 			}
 			mp.Field(i).SetString(s)
 		default:
-			rvf, err := m.mask(rv.Field(i), m.getTag(tag, field.Name), mp.Field(i))
+			rvf, err := m.mask(rv.Field(i), m.getTag(tag, field.Name), mp.Field(i), cb)
 			if err != nil {
 				return reflect.Value{}, err
 			}
@@ -570,13 +629,20 @@ func (m *Masker) maskStruct(rv reflect.Value, tag string, mp reflect.Value) (ref
 	return mp, nil
 }
 
-func (m *Masker) maskSlice(rv reflect.Value, tag string, mp reflect.Value) (reflect.Value, error) {
+func (m *Masker) maskSlice(rv reflect.Value, tag string, mp reflect.Value, cb circuitBreaker) (reflect.Value, error) {
 	var rv2 reflect.Value
 
-	if rt := rv.Type(); rt.Kind() == reflect.Array {
-		rv2 = reflect.New(rt).Elem()
+	if rv.Kind() == reflect.Array {
+		rv2 = reflect.New(rv.Type()).Elem()
 	} else {
+		if rv2 = cb.get(rv); rv2.IsValid() {
+			if mp.CanSet() {
+				mp.Set(rv2)
+			}
+			return rv2, nil
+		}
 		rv2 = reflect.MakeSlice(rv.Type(), rv.Len(), rv.Len())
+		cb.set(rv, rv2)
 	}
 	for i := 0; i < rv.Len(); i++ {
 		value := rv.Index(i)
@@ -606,7 +672,7 @@ func (m *Masker) maskSlice(rv reflect.Value, tag string, mp reflect.Value) (refl
 			}
 			rv2.Index(i).SetUint(uint64(rvf))
 		default:
-			rvf, err := m.mask(value, tag, rv2.Index(i))
+			rvf, err := m.mask(value, tag, rv2.Index(i), cb)
 			if err != nil {
 				return reflect.Value{}, err
 			}
@@ -614,7 +680,7 @@ func (m *Masker) maskSlice(rv reflect.Value, tag string, mp reflect.Value) (refl
 		}
 	}
 
-	if mp.IsValid() {
+	if mp.CanSet() {
 		mp.Set(rv2)
 		return mp, nil
 	}
@@ -622,30 +688,31 @@ func (m *Masker) maskSlice(rv reflect.Value, tag string, mp reflect.Value) (refl
 	return rv2, nil
 }
 
-func (m *Masker) maskMap(rv reflect.Value, tag string, mp reflect.Value) (reflect.Value, error) {
+func (m *Masker) maskMap(rv reflect.Value, tag string, mp reflect.Value, cb circuitBreaker) (reflect.Value, error) {
 	if rv.IsNil() {
 		return reflect.Zero(rv.Type()), nil
 	}
 
 	switch rv.Type().Key().Kind() {
 	case reflect.String:
-		rv2, err := m.maskStringKeyMap(rv, tag)
+		rv2, err := m.maskStringKeyMap(rv, tag, cb)
 		if err != nil {
 			return reflect.Value{}, err
 		}
 		if rv2.IsValid() {
-			if mp.IsValid() {
+			if mp.CanSet() {
 				mp.Set(rv2)
+				return mp, nil
 			}
 			return rv2, nil
 		}
 	}
 
-	rv2, err := m.maskAnyKeyMap(rv, tag)
+	rv2, err := m.maskAnyKeyMap(rv, tag, cb)
 	if err != nil {
 		return reflect.Value{}, err
 	}
-	if mp.IsValid() {
+	if mp.CanSet() {
 		mp.Set(rv2)
 		return mp, nil
 	}
@@ -653,12 +720,12 @@ func (m *Masker) maskMap(rv reflect.Value, tag string, mp reflect.Value) (reflec
 	return rv2, nil
 }
 
-func (m *Masker) maskAnyKeyMap(rv reflect.Value, tag string) (reflect.Value, error) {
+func (m *Masker) maskAnyKeyMap(rv reflect.Value, tag string, cb circuitBreaker) (reflect.Value, error) {
 	rv2 := reflect.MakeMapWithSize(rv.Type(), rv.Len())
 	iter := rv.MapRange()
 	for iter.Next() {
 		key, value := iter.Key(), iter.Value()
-		rf, err := m.mask(value, tag, reflect.Value{})
+		rf, err := m.mask(value, tag, reflect.Value{}, cb)
 		if err != nil {
 			return reflect.Value{}, err
 		}
@@ -668,11 +735,15 @@ func (m *Masker) maskAnyKeyMap(rv reflect.Value, tag string) (reflect.Value, err
 	return rv2, nil
 }
 
-func (m *Masker) maskStringKeyMap(rv reflect.Value, tag string) (reflect.Value, error) {
+func (m *Masker) maskStringKeyMap(rv reflect.Value, tag string, cb circuitBreaker) (reflect.Value, error) {
 	switch rv.Type().Elem().Kind() {
 	case reflect.String:
+		if mp := cb.get(rv); mp.IsValid() {
+			return mp, nil
+		}
 		mm := make(map[string]string, rv.Len())
-		for k, v := range rv.Interface().(map[string]string) {
+		cb.set(rv, reflect.ValueOf(mm))
+		for k, v := range rv.Convert(reflect.TypeOf(mm)).Interface().(map[string]string) {
 			rvf, err := m.String(m.getTag(tag, k), v)
 			if err != nil {
 				return reflect.Value{}, err
@@ -680,20 +751,28 @@ func (m *Masker) maskStringKeyMap(rv reflect.Value, tag string) (reflect.Value, 
 			mm[k] = rvf
 		}
 
-		return reflect.ValueOf(mm), nil
+		return reflect.ValueOf(mm).Convert(rv.Type()), nil
 	case reflect.Int:
+		if mp := cb.get(rv); mp.IsValid() {
+			return mp, nil
+		}
 		mm := make(map[string]int, rv.Len())
-		for k, v := range rv.Interface().(map[string]int) {
+		cb.set(rv, reflect.ValueOf(mm))
+		for k, v := range rv.Convert(reflect.TypeOf(mm)).Interface().(map[string]int) {
 			rvf, err := m.Int(m.getTag(tag, k), v)
 			if err != nil {
 				return reflect.Value{}, err
 			}
 			mm[k] = rvf
 		}
-		return reflect.ValueOf(mm), nil
+		return reflect.ValueOf(mm).Convert(rv.Type()), nil
 	case reflect.Float64:
+		if mp := cb.get(rv); mp.IsValid() {
+			return mp, nil
+		}
 		mm := make(map[string]float64, rv.Len())
-		for k, v := range rv.Interface().(map[string]float64) {
+		cb.set(rv, reflect.ValueOf(mm))
+		for k, v := range rv.Convert(reflect.TypeOf(mm)).Interface().(map[string]float64) {
 			rvf, err := m.Float64(m.getTag(tag, k), v)
 			if err != nil {
 				return reflect.Value{}, err
@@ -701,13 +780,17 @@ func (m *Masker) maskStringKeyMap(rv reflect.Value, tag string) (reflect.Value, 
 			mm[k] = rvf
 		}
 
-		return reflect.ValueOf(mm), nil
+		return reflect.ValueOf(mm).Convert(rv.Type()), nil
 	default:
+		if mp := cb.get(rv); mp.IsValid() {
+			return mp, nil
+		}
 		rv2 := reflect.MakeMapWithSize(rv.Type(), rv.Len())
+		cb.set(rv, rv2)
 		iter := rv.MapRange()
 		for iter.Next() {
 			key, value := iter.Key(), iter.Value()
-			rf, err := m.mask(value, m.getTag(tag, key.String()), reflect.Value{})
+			rf, err := m.mask(value, m.getTag(tag, key.String()), reflect.Value{}, cb)
 			if err != nil {
 				return reflect.Value{}, err
 			}
@@ -720,7 +803,7 @@ func (m *Masker) maskStringKeyMap(rv reflect.Value, tag string) (reflect.Value, 
 
 func (m *Masker) maskString(rv reflect.Value, tag string, mp reflect.Value) (reflect.Value, error) {
 	if tag == "" {
-		if mp.IsValid() {
+		if mp.CanSet() {
 			mp.Set(rv)
 			return mp, nil
 		}
@@ -731,7 +814,7 @@ func (m *Masker) maskString(rv reflect.Value, tag string, mp reflect.Value) (ref
 	if err != nil {
 		return reflect.Value{}, err
 	}
-	if mp.IsValid() {
+	if mp.CanSet() {
 		mp.SetString(sp)
 		return mp, nil
 	}
@@ -745,7 +828,7 @@ func valueOfString(s string) reflect.Value {
 
 func (m *Masker) maskInt(rv reflect.Value, tag string, mp reflect.Value) (reflect.Value, error) {
 	if tag == "" {
-		if mp.IsValid() {
+		if mp.CanSet() {
 			mp.Set(rv)
 			return mp, nil
 		}
@@ -756,7 +839,7 @@ func (m *Masker) maskInt(rv reflect.Value, tag string, mp reflect.Value) (reflec
 	if err != nil {
 		return reflect.Value{}, err
 	}
-	if mp.IsValid() {
+	if mp.CanSet() {
 		mp.SetInt(int64(ip))
 		return mp, nil
 	}
@@ -770,7 +853,7 @@ func (m *Masker) maskInt(rv reflect.Value, tag string, mp reflect.Value) (reflec
 
 func (m *Masker) maskUint(rv reflect.Value, tag string, mp reflect.Value) (reflect.Value, error) {
 	if tag == "" {
-		if mp.IsValid() {
+		if mp.CanSet() {
 			mp.Set(rv)
 			return mp, nil
 		}
@@ -781,7 +864,7 @@ func (m *Masker) maskUint(rv reflect.Value, tag string, mp reflect.Value) (refle
 	if err != nil {
 		return reflect.Value{}, err
 	}
-	if mp.IsValid() {
+	if mp.CanSet() {
 		mp.SetUint(uint64(ip))
 		return mp, nil
 	}
@@ -795,7 +878,7 @@ func (m *Masker) maskUint(rv reflect.Value, tag string, mp reflect.Value) (refle
 
 func (m *Masker) maskfloat(rv reflect.Value, tag string, mp reflect.Value) (reflect.Value, error) {
 	if tag == "" {
-		if mp.IsValid() {
+		if mp.CanSet() {
 			mp.Set(rv)
 			return mp, nil
 		}
@@ -806,7 +889,7 @@ func (m *Masker) maskfloat(rv reflect.Value, tag string, mp reflect.Value) (refl
 	if err != nil {
 		return reflect.Value{}, err
 	}
-	if mp.IsValid() {
+	if mp.CanSet() {
 		mp.SetFloat(fp)
 		return mp, nil
 	}
@@ -816,4 +899,14 @@ func (m *Masker) maskfloat(rv reflect.Value, tag string, mp reflect.Value) (refl
 	}
 
 	return reflect.ValueOf(&fp).Elem(), nil
+}
+
+type eface struct {
+	typ, val unsafe.Pointer
+}
+
+// getAddr extracts value address from interface
+// reflect.Pointer() and reflect.UnsafePointer() in some cases provide non-unique addresses
+func getAddr(arg interface{}) unsafe.Pointer {
+	return (*eface)(unsafe.Pointer(&arg)).val
 }
